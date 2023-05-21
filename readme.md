@@ -27,6 +27,14 @@ Task CR~~U~~D
 Task Procedure Call - Update then Read (Grab only rows you updated)
  - Lightweight Transaction (Prepared Transaction?)
 
+Task {
+  Id: UUID,
+  Type: String, (enum)
+  Send_ts: DateTime,
+  State: String, (enum)
+  Processor: UUID
+}
+
 ## Schedule Worker
 
 Grab BATCH_SIZE rows via updating their send_at time + 10s (2x timeout)
@@ -48,6 +56,18 @@ Error Tolerant
 Router Contract Testing
 Parallelization Testing
 Fault Tolerance Testing
+
+## File Structure
+
+/src
+- /adapters (Scylla DB Adapter)
+- - scylla.rs
+- /models (Persistent Data Models + CR~~U~~D)
+- - task.rs
+- /procedures (Scylla Init CQL Script)
+- - schema.cql
+- main.rs
+- worker.rs
 
 # Specification
 
