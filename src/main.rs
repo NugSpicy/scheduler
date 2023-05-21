@@ -9,15 +9,22 @@ Main
 
 use std::net::SocketAddr;
 
+use adapters::scylla::ScyllaConnection;
 use anyhow::{Error, Result};
 use axum::{
     extract::{Path, Query, State},
     response::{IntoResponse, Response},
     routing, Json, Router,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use models::Task;
+
+mod adapters;
+mod models;
 
 pub struct RouterError(Error);
 
@@ -31,12 +38,26 @@ impl IntoResponse for RouterError {
     }
 }
 
+impl<E> From<E> for RouterError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
+}
+
 #[derive(Clone)]
-struct RequestState {}
+struct RequestState {
+    db: ScyllaConnection,
+}
 
 impl RequestState {
     async fn new() -> Result<RequestState> {
-        Ok(Self {})
+        let conn = ScyllaConnection::new();
+        conn.update_schema("src/procedures/schema.cql").await?;
+
+        Ok(Self { db: conn })
     }
 }
 
@@ -65,7 +86,12 @@ async fn get_task(
     State(state): State<RequestState>,
     Path(id): Path<String>,
 ) -> Result<String, RouterError> {
-    unimplemented!()
+    let uid = Uuid::try_parse(&id)?;
+    let sess = state.db.session().await?;
+
+    let task = models::get_task(sess, uid).await?;
+
+    Ok(serde_json::to_string(&task)?)
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -78,24 +104,49 @@ async fn get_tasks(
     State(state): State<RequestState>,
     query_opts: Option<Query<TaskFilters>>,
 ) -> Result<String, RouterError> {
-    unimplemented!()
+    let Query(query_opts) = query_opts.unwrap_or_default();
+    let sess = state.db.session().await?;
+
+    let tasks = models::get_tasks(
+        sess,
+        query_opts.state,
+        query_opts.since_ts,
+        query_opts.until_ts,
+    )
+    .await?;
+
+    Ok(serde_json::to_string(&tasks)?)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CreateTask {
-    task: String,
+    task_type: String,
     send_ts: DateTime<Utc>,
 }
 async fn create_task(
     State(state): State<RequestState>,
     Json(payload): Json<CreateTask>,
 ) -> Result<String, RouterError> {
-    unimplemented!()
+    let task = Task {
+        id: Uuid::new_v4(),
+        task_type: payload.task_type,
+        send_ts: Duration::seconds(payload.send_ts.timestamp()).into(),
+        state: "READY".to_string(),
+        processor: None,
+    };
+    let sess = state.db.session().await?;
+
+    let id = models::create_task(sess, task).await?;
+
+    Ok(id.to_string())
 }
 
 async fn delete_task(
     State(state): State<RequestState>,
     Path(id): Path<String>,
-) -> Result<String, RouterError> {
-    unimplemented!()
+) -> Result<(), RouterError> {
+    let uid = Uuid::try_parse(&id)?;
+    let sess = state.db.session().await?;
+
+    Ok(models::delete_task(sess, uid).await?)
 }
