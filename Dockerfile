@@ -1,16 +1,9 @@
-FROM rust:1.69-alpine AS rust
+FROM rust:1.67
 
 WORKDIR "/usr/src/scheduler"
-RUN apk add build-base
-RUN apk add protoc
+RUN apt-get install libssl-dev
 COPY . .
 
-FROM rust AS release
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-  cargo build --release &&                            \
-  cp ./target/release/scheduler /usr/local/bin
-
-FROM rust AS dev
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/.cache/target/debug      \
   cargo build --target-dir='/.cache/target' &&        \

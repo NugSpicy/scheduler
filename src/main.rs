@@ -25,6 +25,7 @@ use models::Task;
 
 mod adapters;
 mod models;
+mod worker;
 
 pub struct RouterError(Error);
 
@@ -66,6 +67,9 @@ async fn main() -> Result<()> {
     // Create State Object and wait for any internal connections
     let state = RequestState::new().await?;
 
+    // Create the schedule Supervisor
+    let _sup = worker::Supervisor::new((&state).db.clone());
+
     // Create Router w/ Endpoints defined
     let router = Router::new()
         .route("/task/:id", routing::get(get_task).delete(delete_task))
@@ -97,23 +101,17 @@ async fn get_task(
 #[derive(Debug, Deserialize, Default)]
 pub struct TaskFilters {
     pub state: Option<String>,
-    pub since_ts: Option<DateTime<Utc>>,
-    pub until_ts: Option<DateTime<Utc>>,
+    pub task_type: Option<String>,
 }
+
 async fn get_tasks(
     State(state): State<RequestState>,
-    query_opts: Option<Query<TaskFilters>>,
+    opts: Option<Query<TaskFilters>>,
 ) -> Result<String, RouterError> {
-    let Query(query_opts) = query_opts.unwrap_or_default();
+    let Query(opts) = opts.unwrap_or_default();
     let sess = state.db.session().await?;
 
-    let tasks = models::get_tasks(
-        sess,
-        query_opts.state,
-        query_opts.since_ts,
-        query_opts.until_ts,
-    )
-    .await?;
+    let tasks = models::get_tasks(sess, opts.state, opts.task_type).await?;
 
     Ok(serde_json::to_string(&tasks)?)
 }
@@ -123,6 +121,7 @@ struct CreateTask {
     task_type: String,
     send_ts: DateTime<Utc>,
 }
+
 async fn create_task(
     State(state): State<RequestState>,
     Json(payload): Json<CreateTask>,
@@ -132,7 +131,7 @@ async fn create_task(
         task_type: payload.task_type,
         send_ts: Duration::seconds(payload.send_ts.timestamp()).into(),
         state: "READY".to_string(),
-        processor: None,
+        processor: Uuid::nil(),
     };
     let sess = state.db.session().await?;
 
